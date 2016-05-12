@@ -25,8 +25,6 @@ package com.dtolabs.rundeck.plugin.resources.ec2;
 
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.ClientConfiguration;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.services.ec2.AmazonEC2AsyncClient;
 import com.amazonaws.services.ec2.AmazonEC2Client;
 import com.amazonaws.services.ec2.model.*;
 import com.dtolabs.rundeck.core.common.INodeEntry;
@@ -37,12 +35,6 @@ import org.apache.commons.beanutils.BeanUtils;
 import org.apache.log4j.Logger;
 
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -55,7 +47,6 @@ class InstanceToNodeMapper {
     static final Logger logger = Logger.getLogger(InstanceToNodeMapper.class);
     final AWSCredentials credentials;
     private ClientConfiguration clientConfiguration;
-    private ExecutorService executorService = Executors.newSingleThreadExecutor();
     private ArrayList<String> filterParams;
     private String endpoint;
     private boolean runningStateOnly = true;
@@ -92,63 +83,6 @@ class InstanceToNodeMapper {
 
         mapInstances(nodeSet, instances);
         return nodeSet;
-    }
-
-    /**
-     * Perform the query asynchronously and return the set of instances
-     *
-     */
-    public Future<INodeSet> performQueryAsync() {
-        
-        final AmazonEC2AsyncClient ec2 ;
-        if(null!=credentials){
-            ec2= new AmazonEC2AsyncClient(credentials, clientConfiguration, executorService);
-        } else{
-            ec2 = new AmazonEC2AsyncClient(new DefaultAWSCredentialsProviderChain(), clientConfiguration, executorService);
-        }
-        if (null != getEndpoint()) {
-            ec2.setEndpoint(getEndpoint());
-        }
-        final ArrayList<Filter> filters = buildFilters();
-
-        final Future<DescribeInstancesResult> describeInstancesRequest = ec2.describeInstancesAsync(
-            new DescribeInstancesRequest().withFilters(filters));
-
-        return new Future<INodeSet>() {
-
-            public boolean cancel(boolean b) {
-                return describeInstancesRequest.cancel(b);
-            }
-
-            public boolean isCancelled() {
-                return describeInstancesRequest.isCancelled();
-            }
-
-            public boolean isDone() {
-                return describeInstancesRequest.isDone();
-            }
-
-            public INodeSet get() throws InterruptedException, ExecutionException {
-                DescribeInstancesResult describeInstancesResult = describeInstancesRequest.get();
-
-                final NodeSetImpl nodeSet = new NodeSetImpl();
-                final Set<Instance> instances = examineResult(describeInstancesResult);
-
-                mapInstances(nodeSet, instances);
-                return nodeSet;
-            }
-
-            public INodeSet get(final long l, final TimeUnit timeUnit) throws InterruptedException, ExecutionException,
-                TimeoutException {
-                DescribeInstancesResult describeInstancesResult = describeInstancesRequest.get(l, timeUnit);
-
-                final NodeSetImpl nodeSet = new NodeSetImpl();
-                final Set<Instance> instances = examineResult(describeInstancesResult);
-
-                mapInstances(nodeSet, instances);
-                return nodeSet;
-            }
-        };
     }
 
     private Set<Instance> query(final AmazonEC2Client ec2, final DescribeInstancesRequest request) {
@@ -307,12 +241,6 @@ class InstanceToNodeMapper {
                 }
             }
         }
-//        String hostSel = mapping.getProperty("hostname.selector");
-//        String host = applySelector(inst, hostSel, mapping.getProperty("hostname.default"));
-//        if (null == node.getHostname()) {
-//            System.err.println("Unable to determine hostname for instance: " + inst.getInstanceId());
-//            return null;
-//        }
         String name = node.getNodename();
         if (null == name || "".equals(name)) {
             name = node.getHostname();

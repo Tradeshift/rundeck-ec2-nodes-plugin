@@ -23,22 +23,29 @@
 */
 package com.dtolabs.rundeck.plugin.resources.ec2;
 
-import com.amazonaws.auth.AWSCredentials;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Properties;
+
+import org.apache.log4j.Logger;
+
 import com.amazonaws.ClientConfiguration;
+import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.BasicSessionCredentials;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClient;
-import com.amazonaws.services.securitytoken.model.*;
-import com.dtolabs.rundeck.core.common.*;
+import com.amazonaws.services.securitytoken.model.AssumeRoleRequest;
+import com.amazonaws.services.securitytoken.model.AssumeRoleResult;
+import com.amazonaws.services.securitytoken.model.Credentials;
+import com.dtolabs.rundeck.core.common.INodeSet;
 import com.dtolabs.rundeck.core.plugins.configuration.ConfigurationException;
 import com.dtolabs.rundeck.core.resources.ResourceModelSource;
 import com.dtolabs.rundeck.core.resources.ResourceModelSourceException;
-import org.apache.log4j.Logger;
-
-import java.io.*;
-import java.util.*;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 
 /**
  * EC2ResourceModelSource produces nodes by querying the AWS EC2 API to list instances.
@@ -67,55 +74,53 @@ public class EC2ResourceModelSource implements ResourceModelSource {
     File mappingFile;
     boolean useDefaultMapping = true;
     boolean runningOnly = true;
-    boolean queryAsync = true;
-    Future<INodeSet> futureResult = null;
     final Properties mapping = new Properties();
     final String assumeRoleArn;
 
     AWSCredentials credentials;
-    ClientConfiguration clientConfiguration = new ClientConfiguration();;
-    
+    ClientConfiguration clientConfiguration = new ClientConfiguration();
+
     INodeSet iNodeSet;
     static final Properties defaultMapping = new Properties();
     InstanceToNodeMapper mapper;
 
     static {
         final String mapping = "nodename.selector=tags/Name,instanceId\n"
-                               + "hostname.selector=publicDnsName\n"
-                               + "sshport.default=22\n"
-                               + "sshport.selector=tags/ssh_config_Port\n"
-                               + "description.default=EC2 node instance\n"
-                               + "osArch.selector=architecture\n"
-                               + "osFamily.selector=platform\n"
-                               + "osFamily.default=unix\n"
-                               + "osName.selector=platform\n"
-                               + "osName.default=Linux\n"
-                               + "username.selector=tags/Rundeck-User\n"
-                               + "username.default=ec2-user\n"
-                               + "editUrl.default=https://console.aws.amazon.com/ec2/home#Instances:search=${node.instanceId}\n"
-                               + "privateIpAddress.selector=privateIpAddress\n"
-                               + "privateDnsName.selector=privateDnsName\n"
-                               + "tags.selector=tags/Rundeck-Tags\n"
-                               + "instanceId.selector=instanceId\n"
-                               + "tag.running.selector=state.name=running\n"
-                               + "tag.stopped.selector=state.name=stopped\n"
-                               + "tag.stopping.selector=state.name=stopping\n"
-                               + "tag.shutting-down.selector=state.name=shutting-down\n"
-                               + "tag.terminated.selector=state.name=terminated\n"
-                               + "tag.pending.selector=state.name=pending\n"
-                               + "state.selector=state.name\n"
-                               + "tags.default=ec2\n";
+                + "hostname.selector=publicDnsName\n"
+                + "sshport.default=22\n"
+                + "sshport.selector=tags/ssh_config_Port\n"
+                + "description.default=EC2 node instance\n"
+                + "osArch.selector=architecture\n"
+                + "osFamily.selector=platform\n"
+                + "osFamily.default=unix\n"
+                + "osName.selector=platform\n"
+                + "osName.default=Linux\n"
+                + "username.selector=tags/Rundeck-User\n"
+                + "username.default=ec2-user\n"
+                + "editUrl.default=https://console.aws.amazon.com/ec2/home#Instances:search=${node.instanceId}\n"
+                + "privateIpAddress.selector=privateIpAddress\n"
+                + "privateDnsName.selector=privateDnsName\n"
+                + "tags.selector=tags/Rundeck-Tags\n"
+                + "instanceId.selector=instanceId\n"
+                + "tag.running.selector=state.name=running\n"
+                + "tag.stopped.selector=state.name=stopped\n"
+                + "tag.stopping.selector=state.name=stopping\n"
+                + "tag.shutting-down.selector=state.name=shutting-down\n"
+                + "tag.terminated.selector=state.name=terminated\n"
+                + "tag.pending.selector=state.name=pending\n"
+                + "state.selector=state.name\n"
+                + "tags.default=ec2\n";
         try {
 
             final InputStream resourceAsStream = EC2ResourceModelSource.class.getClassLoader().getResourceAsStream(
-                "defaultMapping.properties");
+                    "defaultMapping.properties");
             if (null != resourceAsStream) {
                 try {
                     defaultMapping.load(resourceAsStream);
                 } finally {
                     resourceAsStream.close();
                 }
-            }else{
+            } else {
                 //fallback in case class loader is misbehaving
                 final StringReader stringReader = new StringReader(mapping);
                 try {
@@ -136,7 +141,7 @@ public class EC2ResourceModelSource implements ResourceModelSource {
         this.endpoint = configuration.getProperty(EC2ResourceModelSourceFactory.ENDPOINT);
         this.httpProxyHost = configuration.getProperty(EC2ResourceModelSourceFactory.HTTP_PROXY_HOST);
         int proxyPort = 80;
-        
+
         final String proxyPortStr = configuration.getProperty(EC2ResourceModelSourceFactory.HTTP_PROXY_PORT);
         if (null != proxyPortStr && !"".equals(proxyPortStr)) {
             try {
@@ -167,26 +172,26 @@ public class EC2ResourceModelSource implements ResourceModelSource {
         refreshInterval = refreshSecs * 1000;
         if (configuration.containsKey(EC2ResourceModelSourceFactory.USE_DEFAULT_MAPPING)) {
             useDefaultMapping = Boolean.parseBoolean(configuration.getProperty(
-                EC2ResourceModelSourceFactory.USE_DEFAULT_MAPPING));
+                    EC2ResourceModelSourceFactory.USE_DEFAULT_MAPPING));
         }
         if (configuration.containsKey(EC2ResourceModelSourceFactory.RUNNING_ONLY)) {
             runningOnly = Boolean.parseBoolean(configuration.getProperty(
-                EC2ResourceModelSourceFactory.RUNNING_ONLY));
+                    EC2ResourceModelSourceFactory.RUNNING_ONLY));
         }
         if (null != accessKey && null != secretKey) {
             credentials = new BasicAWSCredentials(accessKey.trim(), secretKey.trim());
             assumeRoleArn = null;
-        }else{
+        } else {
             assumeRoleArn = configuration.getProperty(EC2ResourceModelSourceFactory.ROLE_ARN);
         }
-        
+
         if (null != httpProxyHost && !"".equals(httpProxyHost)) {
             clientConfiguration.setProxyHost(httpProxyHost);
             clientConfiguration.setProxyPort(httpProxyPort);
             clientConfiguration.setProxyUsername(httpProxyUser);
             clientConfiguration.setProxyPassword(httpProxyPass);
         }
-        
+
         initialize();
     }
 
@@ -220,48 +225,12 @@ public class EC2ResourceModelSource implements ResourceModelSource {
 
 
     public synchronized INodeSet getNodes() throws ResourceModelSourceException {
-        checkFuture();
-        if (!needsRefresh()) {
-            if (null != iNodeSet) {
-                logger.info("Returning " + iNodeSet.getNodeNames().size() + " cached nodes from EC2");
-            }
-            return iNodeSet;
-        }
-        if (lastRefresh > 0 && queryAsync && null == futureResult) {
-            futureResult = mapper.performQueryAsync();
-            lastRefresh = System.currentTimeMillis();
-        } else if (!queryAsync || lastRefresh < 1) {
-            //always perform synchronous query the first time
-            iNodeSet = mapper.performQuery();
-            lastRefresh = System.currentTimeMillis();
-        }
+        iNodeSet = mapper.performQuery();
+        lastRefresh = System.currentTimeMillis();
         if (null != iNodeSet) {
             logger.info("Read " + iNodeSet.getNodeNames().size() + " nodes from EC2");
         }
         return iNodeSet;
-    }
-
-    /**
-     * if any future results are pending, check if they are done and retrieve the results
-     */
-    private void checkFuture() {
-        if (null != futureResult && futureResult.isDone()) {
-            try {
-                iNodeSet = futureResult.get();
-            } catch (InterruptedException e) {
-                logger.debug(e);
-            } catch (ExecutionException e) {
-                logger.warn("Error performing query: " + e.getMessage(), e);
-            }
-            futureResult = null;
-        }
-    }
-
-    /**
-     * Returns true if the last refresh time was longer ago than the refresh interval
-     */
-    private boolean needsRefresh() {
-        return refreshInterval < 0 || (System.currentTimeMillis() - lastRefresh > refreshInterval);
     }
 
     private void loadMapping() {
