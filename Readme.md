@@ -1,6 +1,9 @@
 Rundeck EC2 Nodes Plugin
 ========================
 
+NOTE: This fork contains the following Tradeshift-specific commits:
+- https://github.com/Tradeshift/rundeck-ec2-nodes-plugin/commit/371194b922480a4965638978b521b055c5e60762
+
 Version: 1.5
 
 This is a Resource Model Source plugin for [RunDeck][] 1.5+ that provides
