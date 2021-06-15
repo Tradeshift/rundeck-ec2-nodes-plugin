@@ -19,5 +19,5 @@ metadata:
 
 spec:
   type: other
-  owner: tradeshift/orphan
+  owner: platform-ops
   lifecycle: experimental
